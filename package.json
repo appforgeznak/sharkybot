@@ -1,0 +1,20 @@
+{
+  "name": "sharkybot",
+  "version": "1.0.0",
+  "description": "SharkyFi orderbook fetcher",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "list-orderbooks": "ts-node src/list-orderbooks.ts"
+  },
+  "dependencies": {
+    "@sharkyfi/client": "^7.0.0",
+    "@solana/web3.js": "^1.87.6",
+    "rpc-websockets": "^7.5.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.2"
+  }
+}
