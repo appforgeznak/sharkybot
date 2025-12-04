@@ -8,6 +8,24 @@ const PORT = process.env.PORT || 3000;
 const RPC_URL = process.env.RPC_URL || 'https://api.mainnet-beta.solana.com';
 const COLLECTIONS_PATH = path.join(__dirname, '..', 'config', 'collections.json');
 const UPDATE_INTERVAL = 60_000; // 1 минута
+const ME_API_BASE = 'https://api-mainnet.magiceden.dev/v2';
+
+// Маппинг названий коллекций на символы Magic Eden
+const COLLECTION_SYMBOLS: Record<string, string> = {
+  'DeGods': 'degods',
+  'Mad Lads': 'mad_lads',
+  'Tensorians': 'tensorians',
+  'Famous Fox Federation': 'famous_fox_federation',
+  'Claynosaurz': 'claynosaurz',
+};
+
+interface CollectionStats {
+  floorPrice: number | null; // в SOL
+  topBid: number | null; // в SOL (лучший bid на ME)
+  listedCount: number;
+  avgPrice24hr: number | null;
+  volumeAll: number | null;
+}
 
 interface OrderBookData {
   pubkey: string;
@@ -17,17 +35,92 @@ interface OrderBookData {
   feePercent: number;
   offers: OfferData[];
   totalLiquidity: number; // в SOL
+  floorPrice: number | null; // в SOL
+  topOffer: number | null; // в SOL (лучший sharky offer)
+  meTopBid: number | null; // в SOL (лучший bid на Magic Eden)
+  // Расчётные поля
+  ltv: number | null; // Loan to Value в % (topOffer / floorPrice * 100)
+  floorDiff: number | null; // Разница floor - topOffer в SOL
+  floorDiffPercent: number | null; // Разница в %
+  topBidDiff: number | null; // Разница meTopBid - topOffer в SOL  
+  topBidDiffPercent: number | null; // Разница в %
 }
 
 interface OfferData {
   pubkey: string;
   principalSol: number;
   lender: string;
+  diffFromTop: number | null; // разница от top offer в SOL
+  diffFromTopPercent: number | null; // разница от top offer в %
 }
 
 let orderbooks: OrderBookData[] = [];
 let lastUpdate: Date | null = null;
 let isUpdating = false;
+const collectionStatsCache = new Map<string, CollectionStats>();
+
+interface MEStatsResponse {
+  floorPrice?: number;
+  listedCount?: number;
+  avgPrice24hr?: number;
+  volumeAll?: number;
+}
+
+interface MEPoolResponse {
+  results: Array<{
+    spotPrice: number;
+    poolType: string;
+    expiry: number;
+    buysidePaymentAmount: number;
+  }>;
+}
+
+async function fetchCollectionStats(collectionName: string): Promise<CollectionStats | null> {
+  const symbol = COLLECTION_SYMBOLS[collectionName];
+  if (!symbol) return null;
+
+  try {
+    // Получаем stats и MMM pools параллельно
+    const [statsRes, poolsRes] = await Promise.all([
+      fetch(`${ME_API_BASE}/collections/${symbol}/stats`),
+      fetch(`${ME_API_BASE}/mmm/pools?collectionSymbol=${symbol}&limit=50`),
+    ]);
+
+    const statsData = statsRes.ok ? await statsRes.json() as MEStatsResponse : null;
+    const poolsData = poolsRes.ok ? await poolsRes.json() as MEPoolResponse : null;
+
+    // Находим лучший активный bid из pools
+    // ME берёт ~2% комиссию при instant sell
+    const ME_FEE = 0.02;
+    let topBid: number | null = null;
+    if (poolsData?.results) {
+      const now = Math.floor(Date.now() / 1000);
+      const activeBids = poolsData.results
+        .filter(p => 
+          (p.poolType === 'buy_sided' || p.poolType === 'two_sided') && 
+          p.buysidePaymentAmount > 0 &&
+          (p.expiry === 0 || p.expiry > now) && // не просрочен
+          p.buysidePaymentAmount >= p.spotPrice // достаточно средств для покупки
+        )
+        .map(p => (p.spotPrice / LAMPORTS_PER_SOL) * (1 - ME_FEE)); // net price после комиссии
+      
+      if (activeBids.length > 0) {
+        topBid = Math.max(...activeBids);
+      }
+    }
+
+    return {
+      floorPrice: statsData?.floorPrice ? statsData.floorPrice / LAMPORTS_PER_SOL : null,
+      topBid,
+      listedCount: statsData?.listedCount || 0,
+      avgPrice24hr: statsData?.avgPrice24hr ? statsData.avgPrice24hr / LAMPORTS_PER_SOL : null,
+      volumeAll: statsData?.volumeAll ? statsData.volumeAll / LAMPORTS_PER_SOL : null,
+    };
+  } catch (err) {
+    console.warn(`Failed to fetch ME stats for ${collectionName}:`, err);
+    return null;
+  }
+}
 
 async function fetchOrderbooks() {
   if (isUpdating) return;
@@ -82,16 +175,28 @@ async function fetchOrderbooks() {
         pubkey: loan.pubKey.toBase58(),
         principalSol: loan.data.principalLamports.toNumber() / LAMPORTS_PER_SOL,
         lender: loan.data.loanState.offer?.offer.lenderWallet.toBase58() || '',
+        diffFromTop: null,
+        diffFromTopPercent: null,
       });
     }
 
-    // Сортируем offers по размеру и оставляем только топ-4
+    // Сортируем offers по размеру, рассчитываем разницу от top и оставляем только топ-4
     for (const [key, offers] of offersByOrderbook) {
       offers.sort((a, b) => b.principalSol - a.principalSol);
+      const topOfferValue = offers[0]?.principalSol || 0;
+      
+      // Рассчитываем разницу от top для каждого оффера
+      for (const offer of offers) {
+        offer.diffFromTop = topOfferValue - offer.principalSol;
+        offer.diffFromTopPercent = topOfferValue > 0 
+          ? (offer.diffFromTop / topOfferValue) * 100 
+          : 0;
+      }
+      
       offersByOrderbook.set(key, offers.slice(0, 4));
     }
 
-    const newOrderbooks: OrderBookData[] = [];
+    let newOrderbooks: OrderBookData[] = [];
 
     for (const orderBook of allOrderBooks) {
       let collectionName = '';
@@ -111,6 +216,7 @@ async function fetchOrderbooks() {
       const orderbookKey = orderBook.pubKey.toBase58();
       const offers = offersByOrderbook.get(orderbookKey) || [];
       const totalLiquidity = offers.reduce((sum, o) => sum + o.principalSol, 0);
+      const topOffer = offers.length > 0 ? offers[0].principalSol : null;
 
       newOrderbooks.push({
         pubkey: orderbookKey,
@@ -120,8 +226,50 @@ async function fetchOrderbooks() {
         feePercent: orderBook.feePermillicentage / 1000,
         offers,
         totalLiquidity,
+        floorPrice: null,
+        topOffer,
+        meTopBid: null,
+        ltv: null,
+        floorDiff: null,
+        floorDiffPercent: null,
+        topBidDiff: null,
+        topBidDiffPercent: null,
       });
     }
+
+    // Получаем floor price из Magic Eden для каждой уникальной коллекции
+    const uniqueCollections = [...new Set(newOrderbooks.map(ob => ob.collectionName))];
+    for (const collName of uniqueCollections) {
+      const stats = await fetchCollectionStats(collName);
+      if (stats) {
+        collectionStatsCache.set(collName, stats);
+      }
+    }
+
+    // Заполняем floor price, top bid и рассчитываем метрики
+    for (const ob of newOrderbooks) {
+      const stats = collectionStatsCache.get(ob.collectionName);
+      if (stats) {
+        ob.floorPrice = stats.floorPrice;
+        ob.meTopBid = stats.topBid;
+        
+        // Рассчитываем LTV и разницу floor - offer
+        if (ob.floorPrice && ob.topOffer) {
+          ob.ltv = (ob.topOffer / ob.floorPrice) * 100;
+          ob.floorDiff = ob.floorPrice - ob.topOffer;
+          ob.floorDiffPercent = (ob.floorDiff / ob.floorPrice) * 100;
+        }
+        
+        // Рассчитываем разницу meTopBid - sharky topOffer
+        if (ob.meTopBid && ob.topOffer) {
+          ob.topBidDiff = ob.meTopBid - ob.topOffer;
+          ob.topBidDiffPercent = (ob.topBidDiff / ob.meTopBid) * 100;
+        }
+      }
+    }
+
+    // Фильтруем только 7-дневные orderbooks
+    newOrderbooks = newOrderbooks.filter(ob => ob.durationDays === 7);
 
     // Сортируем по ликвидности (больше первым), потом по имени
     newOrderbooks.sort((a, b) => {
@@ -270,7 +418,7 @@ const HTML_PAGE = `<!DOCTYPE html>
     .card-stats {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 15px;
+      gap: 10px;
       margin-bottom: 15px;
       padding-bottom: 15px;
       border-bottom: 1px solid #2a2a4e;
@@ -288,6 +436,51 @@ const HTML_PAGE = `<!DOCTYPE html>
     
     .stat-value.liquidity {
       color: #00d4ff;
+    }
+    
+    .stat-value.floor {
+      color: #ff9500;
+    }
+    
+    .stat-value.ltv {
+      color: #00ff88;
+    }
+    
+    .stat-value.me-bid {
+      color: #e040fb;
+    }
+    
+    .stat-value.diff-positive {
+      color: #ff4444;
+    }
+    
+    .stat-value.diff-negative {
+      color: #00ff88;
+    }
+    
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 15px;
+      padding: 10px;
+      background: #0a0a0f;
+      border-radius: 8px;
+    }
+    
+    .metric {
+      text-align: center;
+    }
+    
+    .metric-value {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    
+    .metric-label {
+      font-size: 9px;
+      color: #666;
+      text-transform: uppercase;
     }
     
     .stat-label {
@@ -337,6 +530,23 @@ const HTML_PAGE = `<!DOCTYPE html>
     
     .offer-lender:hover {
       color: #00d4ff;
+    }
+    
+    .offer-badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    
+    .offer-badge.top {
+      background: #00ff88;
+      color: #000;
+    }
+    
+    .offer-diff {
+      font-size: 10px;
+      color: #ff6b6b;
     }
     
     .no-offers {
@@ -486,9 +696,12 @@ const HTML_PAGE = `<!DOCTYPE html>
           offersHtml = '<div class="no-offers">No active offers</div>';
         } else {
           offersHtml = '<div class="offers-list">' + 
-            ob.offers.map(function(offer) {
+            ob.offers.map(function(offer, idx) {
+              var diffText = idx === 0 ? '<span class="offer-badge top">TOP</span>' : 
+                '<span class="offer-diff">-' + offer.diffFromTop.toFixed(2) + ' (' + offer.diffFromTopPercent.toFixed(1) + '%)</span>';
               return '<div class="offer">' +
                 '<span class="offer-amount">' + offer.principalSol.toFixed(2) + ' SOL</span>' +
+                diffText +
                 '<span class="offer-lender" data-pubkey="' + offer.lender + '" title="Click to copy">' + 
                   offer.lender.slice(0, 4) + '...' + offer.lender.slice(-4) + 
                 '</span>' +
@@ -504,16 +717,30 @@ const HTML_PAGE = `<!DOCTYPE html>
           '</div>' +
           '<div class="card-stats">' +
             '<div class="stat">' +
-              '<div class="stat-value liquidity">' + ob.totalLiquidity.toFixed(2) + '</div>' +
-              '<div class="stat-label">SOL Available</div>' +
+              '<div class="stat-value floor">' + (ob.floorPrice ? ob.floorPrice.toFixed(4) : 'N/A') + '</div>' +
+              '<div class="stat-label">Floor</div>' +
             '</div>' +
             '<div class="stat">' +
-              '<div class="stat-value">' + ob.offers.length + '</div>' +
-              '<div class="stat-label">Offers</div>' +
+              '<div class="stat-value me-bid">' + (ob.meTopBid ? ob.meTopBid.toFixed(4) : 'N/A') + '</div>' +
+              '<div class="stat-label">ME Top Bid</div>' +
             '</div>' +
             '<div class="stat">' +
-              '<div class="stat-value">' + (ob.durationDays || 'N/A') + '</div>' +
-              '<div class="stat-label">Days</div>' +
+              '<div class="stat-value ltv">' + (ob.ltv ? ob.ltv.toFixed(1) + '%' : 'N/A') + '</div>' +
+              '<div class="stat-label">LTV</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="metrics-row">' +
+            '<div class="metric">' +
+              '<div class="metric-value ' + (ob.floorDiff > 0 ? 'diff-positive' : 'diff-negative') + '">' + 
+                (ob.floorDiff !== null ? (ob.floorDiff > 0 ? '+' : '') + ob.floorDiff.toFixed(4) : 'N/A') + 
+              '</div>' +
+              '<div class="metric-label">Floor - Sharky</div>' +
+            '</div>' +
+            '<div class="metric">' +
+              '<div class="metric-value ' + (ob.topBidDiff > 0 ? 'diff-positive' : 'diff-negative') + '">' + 
+                (ob.topBidDiff !== null ? (ob.topBidDiff > 0 ? '+' : '') + ob.topBidDiff.toFixed(4) : 'N/A') + 
+              '</div>' +
+              '<div class="metric-label">ME Bid - Sharky</div>' +
             '</div>' +
           '</div>' +
           '<div class="offers-section">' +
