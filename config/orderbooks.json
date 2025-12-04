@@ -1,0 +1,44 @@
+[
+  {
+    "pubkey": "5Qjuwat77TeBtcVg4weeieh9aBQ9GcBHSi3hQT8avwyt",
+    "collectionName": "Claynosaurz",
+    "apr": 98.371,
+    "durationDays": 7,
+    "feePercent": 20
+  },
+  {
+    "pubkey": "BcsrQeev9j4WhLzKzwAk2yrJzasGU8CnrmnGec5TtZUF",
+    "collectionName": "DeGods",
+    "apr": 128.387,
+    "durationDays": 7,
+    "feePercent": 20
+  },
+  {
+    "pubkey": "5z5ZT9tvGxMxwDumBkSXo6GwWbt6J7qG2VQJCFooDq2d",
+    "collectionName": "DeGods",
+    "apr": 93.597,
+    "durationDays": 14,
+    "feePercent": 16
+  },
+  {
+    "pubkey": "2yGRv7B3TY9TM75LGUYy6p2UpMkUhMDh5HRBERKjnPj7",
+    "collectionName": "Famous Fox Federation",
+    "apr": 80.108,
+    "durationDays": 7,
+    "feePercent": 20
+  },
+  {
+    "pubkey": "14tngHvcSm4NySKmeDrM2G1bb9QBcVXCtpD9Vt5nKZ1Z",
+    "collectionName": "Mad Lads",
+    "apr": 128.387,
+    "durationDays": 7,
+    "feePercent": 20
+  },
+  {
+    "pubkey": "7a4pjsUTS7TEjBuFwLCAPNMrmRKvTUTALNnWUztNxTQe",
+    "collectionName": "Tensorians",
+    "apr": 128.387,
+    "durationDays": 7,
+    "feePercent": 20
+  }
+]

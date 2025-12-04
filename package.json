@@ -2,7 +2,6 @@
   "name": "sharkybot",
   "version": "1.0.0",
   "description": "SharkyFi orderbook fetcher",
-  "main": "src/index.ts",
   "scripts": {
     "start": "ts-node src/server.ts",
     "fetch": "ts-node src/fetch-orderbooks.ts",
