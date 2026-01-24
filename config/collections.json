@@ -1,8 +1,12 @@
 [
-  "DeGods",
-  "Mad Lads",
-  "Tensorians",
-  "Famous Fox Federation",
-  "Claynosaurz"
+  { "name": "Mad Lads", "match": "Mad Lads" },
+  { "name": "Claynosaurz", "match": "Claynosaurz" },
+  { "name": "SMB Gen2 - 14d", "match": "SMB Gen2", "duration": 14 },
+  { "name": "DeGods", "match": "DeGods" },
+  { "name": "SMB Gen2 - 3d", "match": "SMB Gen2", "duration": 3 },
+  { "name": "GGSG: Galactic Geckos", "match": "GGSG: Galactic Geckos" },
+  { "name": "SMB Gen3", "match": "SMB Gen3" },
+  { "name": "sharx Lvl4", "match": "sharx", "duration": 16 },
+  { "name": "Famous Fox Federation", "match": "Famous Fox Federation" },
+  { "name": "Dead King Society Nobles", "match": "Dead King Society Nobles" }
 ]
-

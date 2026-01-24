@@ -1,5 +1,5 @@
 import express from 'express';
-import { createSharkyClient, createProvider, OfferedLoan } from '@sharkyfi/client';
+import { collectionNameByOrderBookPubKey, createSharkyClient, createProvider, OfferedLoan } from '@sharkyfi/client';
 import { Connection, Keypair, Transaction, VersionedTransaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -7,10 +7,11 @@ import * as path from 'path';
 const PORT = process.env.PORT || 3000;
 const RPC_URL = process.env.RPC_URL || 'https://api.mainnet-beta.solana.com';
 const COLLECTIONS_PATH = path.join(__dirname, '..', 'config', 'collections.json');
-const UPDATE_INTERVAL = 60_000; // 1 минута
+const UPDATE_INTERVAL = 60_000; // 1 Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°
 const ME_API_BASE = 'https://api-mainnet.magiceden.dev/v2';
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 60000);
 
-// Маппинг названий коллекций на символы Magic Eden
+// Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚Сљ Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В° Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњ Magic Eden
 const COLLECTION_SYMBOLS: Record<string, string> = {
   'DeGods': 'degods',
   'Mad Lads': 'mad_lads',
@@ -20,41 +21,42 @@ const COLLECTION_SYMBOLS: Record<string, string> = {
 };
 
 interface CollectionStats {
-  floorPrice: number | null; // в SOL
-  topBid: number | null; // в SOL (лучший bid на ME)
+  floorPrice: number | null; // Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  SOL
+  topBid: number | null; // Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  SOL (Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р В Р вЂ№Р В Р вЂ Р Р†Р вЂљРЎв„ўР вЂ™Р’В¬Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ bid Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В° ME)
   listedCount: number;
   avgPrice24hr: number | null;
   volumeAll: number | null;
 }
 
-interface OrderBookData {
-  pubkey: string;
+interface CollectionData {
   collectionName: string;
-  apr: number;
-  durationDays: number | null;
-  feePercent: number;
   offers: OfferData[];
-  totalLiquidity: number; // в SOL
-  floorPrice: number | null; // в SOL
-  topOffer: number | null; // в SOL (лучший sharky offer)
-  meTopBid: number | null; // в SOL (лучший bid на Magic Eden)
-  // Расчётные поля
-  ltv: number | null; // Loan to Value в % (topOffer / floorPrice * 100)
-  floorDiff: number | null; // Разница floor - topOffer в SOL
-  floorDiffPercent: number | null; // Разница в %
-  topBidDiff: number | null; // Разница meTopBid - topOffer в SOL  
-  topBidDiffPercent: number | null; // Разница в %
+  offerCount: number;
+  totalLiquidity: number; // in SOL
+  bestOffer: number | null; // best offer per collection (SOL)
+  floorPrice: number | null; // in SOL
+  meTopBid: number | null; // ME instant-sell top bid (SOL)
+  floorDiff: number | null;
+  floorDiffPercent: number | null;
+  topBidDiff: number | null;
+  topBidDiffPercent: number | null;
+}
+
+interface CollectionConfig {
+  name: string;
+  listAccount?: string;
+  collectionKey?: string;
 }
 
 interface OfferData {
   pubkey: string;
   principalSol: number;
   lender: string;
-  diffFromTop: number | null; // разница от top offer в SOL
-  diffFromTopPercent: number | null; // разница от top offer в %
+  diffFromTop: number | null; // Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В° Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ top offer Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  SOL
+  diffFromTopPercent: number | null; // Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В° Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ top offer Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  %
 }
 
-let orderbooks: OrderBookData[] = [];
+let orderbooks: CollectionData[] = [];
 let lastUpdate: Date | null = null;
 let isUpdating = false;
 const collectionStatsCache = new Map<string, CollectionStats>();
@@ -80,7 +82,7 @@ async function fetchCollectionStats(collectionName: string): Promise<CollectionS
   if (!symbol) return null;
 
   try {
-    // Получаем stats и MMM pools параллельно
+    // Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎСџР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В stats Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В MMM pools Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›
     const [statsRes, poolsRes] = await Promise.all([
       fetch(`${ME_API_BASE}/collections/${symbol}/stats`),
       fetch(`${ME_API_BASE}/mmm/pools?collectionSymbol=${symbol}&limit=50`),
@@ -89,8 +91,8 @@ async function fetchCollectionStats(collectionName: string): Promise<CollectionS
     const statsData = statsRes.ok ? await statsRes.json() as MEStatsResponse : null;
     const poolsData = poolsRes.ok ? await poolsRes.json() as MEPoolResponse : null;
 
-    // Находим лучший активный bid из pools
-    // ME берёт ~2% комиссию при instant sell
+    // Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р вЂ™Р’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р В Р вЂ№Р В Р вЂ Р Р†Р вЂљРЎв„ўР вЂ™Р’В¬Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ bid Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В· pools
+    // ME Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р вЂ™Р’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћ ~2% Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРІвЂћвЂ“ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В instant sell
     const ME_FEE = 0.02;
     let topBid: number | null = null;
     if (poolsData?.results) {
@@ -99,10 +101,10 @@ async function fetchCollectionStats(collectionName: string): Promise<CollectionS
         .filter(p => 
           (p.poolType === 'buy_sided' || p.poolType === 'two_sided') && 
           p.buysidePaymentAmount > 0 &&
-          (p.expiry === 0 || p.expiry > now) && // не просрочен
-          p.buysidePaymentAmount >= p.spotPrice // достаточно средств для покупки
+          (p.expiry === 0 || p.expiry > now) && // Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦
+          p.buysidePaymentAmount >= p.spotPrice // Р В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В  Р В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В Р РЏ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В
         )
-        .map(p => (p.spotPrice / LAMPORTS_PER_SOL) * (1 - ME_FEE)); // net price после комиссии
+        .map(p => (p.spotPrice / LAMPORTS_PER_SOL) * (1 - ME_FEE)); // net price Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В
       
       if (activeBids.length > 0) {
         topBid = Math.max(...activeBids);
@@ -122,15 +124,155 @@ async function fetchCollectionStats(collectionName: string): Promise<CollectionS
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${FETCH_TIMEOUT_MS}ms`));
+    }, FETCH_TIMEOUT_MS);
+
+    promise
+      .then(value => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(err => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+function loadCollectionsConfig(): any[] {
+  if (!fs.existsSync(COLLECTIONS_PATH)) {
+    console.warn(`Collections config not found: ${COLLECTIONS_PATH}. Using all collections.`);
+    return [];
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));
+    if (!Array.isArray(raw)) {
+      console.warn('Collections config must be an array. Using all collections.');
+      return [];
+    }
+    return raw;
+  } catch (err) {
+    console.warn('Failed to parse collections config. Using all collections.', err);
+    return [];
+  }
+}
+
+function normalizeListAccount(value?: string): string {
+  if (!value) return '';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === 'REPLACE_WITH_LIST_ACCOUNT') {
+    return '';
+  }
+  return trimmed;
+}
+
+type NameRule = {
+  match: string;
+  display: string;
+  duration?: number;
+};
+
+function loadCollectionsWhitelist() {
+  const listAccountSet = new Set<string>();
+  const collectionKeySet = new Set<string>();
+  const listAccountToName = new Map<string, string>();
+  const collectionKeyToName = new Map<string, string>();
+  const nameRules: NameRule[] = [];
+  const raw = loadCollectionsConfig();
+  if (raw.length === 0) {
+    return {
+      enforceWhitelist: false,
+      listAccountSet,
+      collectionKeySet,
+      listAccountToName,
+      collectionKeyToName,
+      nameRules,
+    };
+  }
+
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      const listAccount = normalizeListAccount(item);
+      if (listAccount) {
+        listAccountSet.add(listAccount);
+        listAccountToName.set(listAccount, `NFT List ${listAccount.slice(0, 8)}`);
+        continue;
+      }
+      const matchName = item.trim();
+      if (matchName) {
+        nameRules.push({ match: matchName, display: matchName });
+      }
+      continue;
+    }
+
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    let name = '';
+    if (typeof item.name === 'string') {
+      name = item.name.trim();
+    } else if (typeof item.collectionName === 'string') {
+      name = item.collectionName.trim();
+    }
+
+    const listAccount = normalizeListAccount(
+      typeof item.listAccount === 'string' ? item.listAccount : ''
+    );
+    const collectionKey = typeof item.collectionKey === 'string' ? item.collectionKey.trim() : '';
+    const matchName = typeof item.match === 'string'
+      ? item.match.trim()
+      : (typeof item.collectionName === 'string' ? item.collectionName.trim() : '');
+    const duration = typeof item.duration === 'number' && Number.isFinite(item.duration)
+      ? item.duration
+      : undefined;
+
+    if (listAccount) {
+      listAccountSet.add(listAccount);
+      listAccountToName.set(listAccount, name || `NFT List ${listAccount.slice(0, 8)}`);
+    }
+
+    if (collectionKey) {
+      collectionKeySet.add(collectionKey);
+      collectionKeyToName.set(collectionKey, name || `Collection ${collectionKey.slice(0, 8)}`);
+    }
+
+    if (!listAccount && !collectionKey) {
+      const match = matchName || name;
+      if (match) {
+        nameRules.push({
+          match,
+          display: name || match,
+          duration,
+        });
+      } else {
+        console.warn(`Whitelist entry missing name/listAccount/collectionKey: ${JSON.stringify(item)}`);
+      }
+    }
+  }
+
+  const enforceWhitelist = listAccountSet.size > 0 || collectionKeySet.size > 0 || nameRules.length > 0;
+  if (enforceWhitelist) {
+    console.log(
+      `Loaded whitelist: ${listAccountSet.size} list accounts, ${collectionKeySet.size} collection keys, ${nameRules.length} name rules`
+    );
+  } else {
+    console.warn('Whitelist loaded but no valid listAccount/collectionKey entries found.');
+  }
+
+  return { enforceWhitelist, listAccountSet, collectionKeySet, listAccountToName, collectionKeyToName, nameRules };
+}
+
 async function fetchOrderbooks() {
   if (isUpdating) return;
   isUpdating = true;
 
   try {
     console.log('[' + new Date().toISOString() + '] Fetching orderbooks and offers...');
-
-    const collections: string[] = JSON.parse(fs.readFileSync(COLLECTIONS_PATH, 'utf-8'));
-    const collectionsSet = new Set(collections.map(c => c.toLowerCase()));
 
     const wallet = Keypair.generate();
     const connection = new Connection(RPC_URL, 'confirmed');
@@ -142,102 +284,155 @@ async function fetchOrderbooks() {
     });
 
     const sharky = createSharkyClient(provider, undefined, 'mainnet');
+    const whitelist = loadCollectionsWhitelist();
 
-    // Загружаем orderbooks и nftLists сначала
-    const [allOrderBooks, nftLists] = await Promise.all([
+    // Load orderbooks
+    const allOrderBooks = await withTimeout(
       sharky.fetchAllOrderBooks({ program: sharky.program }),
-      sharky.fetchAllNftLists({ program: sharky.program }),
-    ]);
+      'fetchAllOrderBooks'
+    );
 
-    // Небольшая пауза перед загрузкой loans
+// Р В Р’В Р вЂ™Р’В Р В Р Р‹Р РЋРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р Р†Р вЂљРЎв„ўР вЂ™Р’В¬Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р’В Р В Р РЏ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В° Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В·Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р вЂ Р Р†Р вЂљРЎвЂєР Р†Р вЂљРІР‚Сљ loans
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     let allLoans: Awaited<ReturnType<typeof sharky.fetchAllLoans>> = [];
     try {
-      allLoans = await sharky.fetchAllLoans({ program: sharky.program });
+      allLoans = await withTimeout(sharky.fetchAllLoans({ program: sharky.program }), 'fetchAllLoans');
     } catch (err) {
       console.warn('Failed to fetch loans (rate limit?), continuing without offers');
     }
 
-    const nftListMap = new Map(nftLists.map(list => [list.pubKey.toBase58(), list.collectionName]));
+    const { enforceWhitelist, listAccountSet, collectionKeySet, listAccountToName, collectionKeyToName, nameRules } = whitelist;
+    console.log(`[${new Date().toISOString()}] Orderbooks: ${allOrderBooks.length}`);
 
-    // Фильтруем только offered loans (не taken)
+    // Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В¤Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› offered loans (Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ taken)
     const offeredLoans = allLoans.filter((loan): loan is OfferedLoan => loan.state === 'offered');
+    console.log(`[${new Date().toISOString()}] Offered loans: ${offeredLoans.length}`);
     
-    // Группируем offers по orderbook
+    // Р В Р’В Р вЂ™Р’В Р В Р вЂ Р В РІР‚С™Р РЋРЎв„ўР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В offers Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› orderbook
     const offersByOrderbook = new Map<string, OfferData[]>();
+    const liquidityByOrderbook = new Map<string, number>();
+    const offerCountByOrderbook = new Map<string, number>();
     for (const loan of offeredLoans) {
       const orderbookKey = loan.data.orderBook.toBase58();
       if (!offersByOrderbook.has(orderbookKey)) {
         offersByOrderbook.set(orderbookKey, []);
       }
+      const principalSol = loan.data.principalLamports.toNumber() / LAMPORTS_PER_SOL;
       offersByOrderbook.get(orderbookKey)!.push({
         pubkey: loan.pubKey.toBase58(),
-        principalSol: loan.data.principalLamports.toNumber() / LAMPORTS_PER_SOL,
+        principalSol,
         lender: loan.data.loanState.offer?.offer.lenderWallet.toBase58() || '',
         diffFromTop: null,
         diffFromTopPercent: null,
       });
+      liquidityByOrderbook.set(orderbookKey, (liquidityByOrderbook.get(orderbookKey) || 0) + principalSol);
+      offerCountByOrderbook.set(orderbookKey, (offerCountByOrderbook.get(orderbookKey) || 0) + 1);
     }
 
-    // Сортируем offers по размеру, рассчитываем разницу от top и оставляем только топ-4
-    for (const [key, offers] of offersByOrderbook) {
-      offers.sort((a, b) => b.principalSol - a.principalSol);
-      const topOfferValue = offers[0]?.principalSol || 0;
-      
-      // Рассчитываем разницу от top для каждого оффера
-      for (const offer of offers) {
-        offer.diffFromTop = topOfferValue - offer.principalSol;
-        offer.diffFromTopPercent = topOfferValue > 0 
-          ? (offer.diffFromTop / topOfferValue) * 100 
-          : 0;
-      }
-      
-      offersByOrderbook.set(key, offers.slice(0, 4));
-    }
-
-    let newOrderbooks: OrderBookData[] = [];
+    const collectionMap = new Map<string, {
+      collectionName: string;
+      offers: OfferData[];
+      offerCount: number;
+      totalLiquidity: number;
+    }>();
 
     for (const orderBook of allOrderBooks) {
+      const orderbookKey = orderBook.pubKey.toBase58();
+      const durationSeconds = orderBook.loanTerms.fixed?.terms.time?.duration?.toNumber();
+      const durationDays = durationSeconds ? Math.round(durationSeconds / (24 * 60 * 60)) : null;
+      const mappedName = collectionNameByOrderBookPubKey[orderbookKey] || '';
+      let matchedRule: NameRule | null = null;
+      if (mappedName) {
+        for (const rule of nameRules) {
+          if (rule.match === mappedName && (!rule.duration || rule.duration === durationDays)) {
+            matchedRule = rule;
+            break;
+          }
+        }
+      }
+
       let collectionName = '';
 
       if (orderBook.orderBookType.nftList) {
-        collectionName = nftListMap.get(orderBook.orderBookType.nftList.listAccount.toBase58()) || '';
+        const listKey = orderBook.orderBookType.nftList.listAccount.toBase58();
+        const listAllowed = listAccountSet.has(listKey);
+        if (enforceWhitelist && !listAllowed && !matchedRule) {
+          continue;
+        }
+        collectionName = listAccountToName.get(listKey) || matchedRule?.display || mappedName || `NFT List ${listKey.slice(0, 8)}`;
+      } else if (orderBook.orderBookType.collection) {
+        const collectionKey = orderBook.orderBookType.collection.collectionKey.toBase58();
+        const collectionAllowed = collectionKeySet.has(collectionKey);
+        if (enforceWhitelist && !collectionAllowed && !matchedRule) {
+          continue;
+        }
+        collectionName = collectionKeyToName.get(collectionKey) || matchedRule?.display || mappedName || `Collection ${collectionKey.slice(0, 8)}`;
+      } else {
+        if (enforceWhitelist && !matchedRule) {
+          continue;
+        }
+        collectionName = matchedRule?.display || mappedName;
       }
 
-      if (!collectionName || !collectionsSet.has(collectionName.toLowerCase())) {
+      if (!collectionName) {
         continue;
       }
 
-      const apr = orderBook.apy.fixed?.apy ? orderBook.apy.fixed.apy / 1000 : 0;
-      const durationSeconds = orderBook.loanTerms.fixed?.terms.time?.duration?.toNumber();
-      const durationDays = durationSeconds ? durationSeconds / (24 * 60 * 60) : null;
-
-      const orderbookKey = orderBook.pubKey.toBase58();
       const offers = offersByOrderbook.get(orderbookKey) || [];
-      const totalLiquidity = offers.reduce((sum, o) => sum + o.principalSol, 0);
-      const topOffer = offers.length > 0 ? offers[0].principalSol : null;
+      offers.sort((a, b) => b.principalSol - a.principalSol);
+      const topOffers = offers.slice(0, 4);
+      const totalLiquidity = liquidityByOrderbook.get(orderbookKey) || 0;
+      const offerCount = offerCountByOrderbook.get(orderbookKey) || 0;
 
-      newOrderbooks.push({
-        pubkey: orderbookKey,
-        collectionName,
-        apr,
-        durationDays,
-        feePercent: orderBook.feePermillicentage / 1000,
-        offers,
-        totalLiquidity,
+      if (!collectionMap.has(collectionName)) {
+        collectionMap.set(collectionName, {
+          collectionName,
+          offers: [],
+          offerCount: 0,
+          totalLiquidity: 0,
+        });
+      }
+
+      const entry = collectionMap.get(collectionName)!;
+      entry.offers.push(...topOffers);
+      entry.offerCount += offerCount;
+      entry.totalLiquidity += totalLiquidity;
+    }
+
+    let newOrderbooks: CollectionData[] = Array.from(collectionMap.values()).map(entry => {
+      entry.offers.sort((a, b) => b.principalSol - a.principalSol);
+      const bestOffer = entry.offers[0]?.principalSol ?? null;
+
+      if (bestOffer !== null) {
+        for (const offer of entry.offers) {
+          offer.diffFromTop = bestOffer - offer.principalSol;
+          offer.diffFromTopPercent = bestOffer > 0
+            ? (offer.diffFromTop / bestOffer) * 100
+            : 0;
+        }
+      } else {
+        for (const offer of entry.offers) {
+          offer.diffFromTop = null;
+          offer.diffFromTopPercent = null;
+        }
+      }
+
+      return {
+        collectionName: entry.collectionName,
+        offers: entry.offers.slice(0, 4),
+        offerCount: entry.offerCount,
+        totalLiquidity: entry.totalLiquidity,
+        bestOffer,
         floorPrice: null,
-        topOffer,
         meTopBid: null,
-        ltv: null,
         floorDiff: null,
         floorDiffPercent: null,
         topBidDiff: null,
         topBidDiffPercent: null,
-      });
-    }
-
-    // Получаем floor price из Magic Eden для каждой уникальной коллекции
+      };
+    });
+    console.log(`[${new Date().toISOString()}] Collections after grouping: ${newOrderbooks.length}`);
     const uniqueCollections = [...new Set(newOrderbooks.map(ob => ob.collectionName))];
     for (const collName of uniqueCollections) {
       const stats = await fetchCollectionStats(collName);
@@ -246,32 +441,28 @@ async function fetchOrderbooks() {
       }
     }
 
-    // Заполняем floor price, top bid и рассчитываем метрики
+    // Р В Р’В Р вЂ™Р’В Р В Р вЂ Р В РІР‚С™Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р В Р вЂ№Р В Р’В Р В Р РЏР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В floor price, top bid Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р В Р вЂ№Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В°Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В
     for (const ob of newOrderbooks) {
       const stats = collectionStatsCache.get(ob.collectionName);
       if (stats) {
         ob.floorPrice = stats.floorPrice;
         ob.meTopBid = stats.topBid;
-        
-        // Рассчитываем LTV и разницу floor - offer
-        if (ob.floorPrice && ob.topOffer) {
-          ob.ltv = (ob.topOffer / ob.floorPrice) * 100;
-          ob.floorDiff = ob.floorPrice - ob.topOffer;
+        // Deltas: floor - best offer
+        if (ob.floorPrice && ob.bestOffer) {
+          ob.floorDiff = ob.floorPrice - ob.bestOffer;
           ob.floorDiffPercent = (ob.floorDiff / ob.floorPrice) * 100;
         }
-        
-        // Рассчитываем разницу meTopBid - sharky topOffer
-        if (ob.meTopBid && ob.topOffer) {
-          ob.topBidDiff = ob.meTopBid - ob.topOffer;
+        // Deltas: ME top bid - best offer
+        if (ob.meTopBid && ob.bestOffer) {
+          ob.topBidDiff = ob.meTopBid - ob.bestOffer;
           ob.topBidDiffPercent = (ob.topBidDiff / ob.meTopBid) * 100;
         }
       }
     }
 
-    // Фильтруем только 7-дневные orderbooks
-    newOrderbooks = newOrderbooks.filter(ob => ob.durationDays === 7);
+    // Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В¤Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› 7-Р В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ orderbooks
 
-    // Сортируем по ликвидности (больше первым), потом по имени
+    // Р В Р’В Р вЂ™Р’В Р В Р’В Р В РІР‚в„–Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р В Р вЂ№Р В Р Р‹Р Р†Р вЂљРЎС™Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎСљР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В РЎС›Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р’В Р РЋРІР‚СљР В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В (Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В±Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’В»Р В Р’В Р В Р вЂ№Р В Р’В Р В РІР‚В°Р В Р’В Р В Р вЂ№Р В Р вЂ Р Р†Р вЂљРЎв„ўР вЂ™Р’В¬Р В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’Вµ Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р В Р вЂ№Р В Р’В Р Р†Р вЂљРЎв„ўР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р Р†РІР‚С›РІР‚вЂњР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В), Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р В Р вЂ№Р В Р вЂ Р В РІР‚С™Р РЋРІвЂћСћР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС›Р В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’В Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРІР‚СњР В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљРЎС› Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’ВР В Р’В Р вЂ™Р’В Р В Р Р‹Р вЂ™Р’ВР В Р’В Р вЂ™Р’В Р В РІР‚в„ўР вЂ™Р’ВµР В Р’В Р вЂ™Р’В Р В Р’В Р Р†Р вЂљР’В¦Р В Р’В Р вЂ™Р’В Р В Р Р‹Р Р†Р вЂљР’В
     newOrderbooks.sort((a, b) => {
       if (b.totalLiquidity !== a.totalLiquidity) {
         return b.totalLiquidity - a.totalLiquidity;
@@ -282,8 +473,11 @@ async function fetchOrderbooks() {
     orderbooks = newOrderbooks;
     lastUpdate = new Date();
 
-    const totalOffers = newOrderbooks.reduce((sum, ob) => sum + ob.offers.length, 0);
-    console.log('[' + new Date().toISOString() + '] Found ' + orderbooks.length + ' orderbooks with ' + totalOffers + ' offers');
+    const totalOffers = newOrderbooks.reduce((sum, ob) => sum + ob.offerCount, 0);
+    console.log(
+      '[' + new Date().toISOString() + '] Found ' +
+      orderbooks.length + ' collections with ' + totalOffers + ' offers'
+    );
   } catch (err) {
     console.error('Error fetching orderbooks:', err);
   } finally {
@@ -409,7 +603,7 @@ const HTML_PAGE = `<!DOCTYPE html>
       color: #fff;
     }
     
-    .apr {
+    .best-offer {
       font-size: 20px;
       font-weight: 700;
       color: #00ff88;
@@ -442,7 +636,7 @@ const HTML_PAGE = `<!DOCTYPE html>
       color: #ff9500;
     }
     
-    .stat-value.ltv {
+    .stat-value.best {
       color: #00ff88;
     }
     
@@ -608,7 +802,7 @@ const HTML_PAGE = `<!DOCTYPE html>
 <body>
   <div class="container">
     <header>
-      <h1>🦈 SharkyBot</h1>
+      <h1>Р В Р Р‹Р В РІР‚С™Р В Р Р‹Р РЋРЎСџР В РІР‚в„ўР вЂ™Р’В¦Р В Р вЂ Р Р†Р вЂљРЎв„ўР вЂ™Р’В¬ SharkyBot</h1>
       <div class="status">
         <div class="status-dot" id="statusDot"></div>
         <span id="lastUpdate">Loading...</span>
@@ -668,7 +862,7 @@ const HTML_PAGE = `<!DOCTYPE html>
       }
       
       // Summary
-      const totalOffers = data.orderbooks.reduce(function(sum, ob) { return sum + ob.offers.length; }, 0);
+      const totalOffers = data.orderbooks.reduce(function(sum, ob) { return sum + ob.offerCount; }, 0);
       const totalLiquidity = data.orderbooks.reduce(function(sum, ob) { return sum + ob.totalLiquidity; }, 0);
       
       summary.innerHTML = 
@@ -678,7 +872,7 @@ const HTML_PAGE = `<!DOCTYPE html>
         '</div>' +
         '<div class="summary-item">' +
           '<span class="summary-value">' + totalOffers + '</span>' +
-          '<span class="summary-label">Active Offers</span>' +
+          '<span class="summary-label">Offers</span>' +
         '</div>' +
         '<div class="summary-item">' +
           '<span class="summary-value">' + totalLiquidity.toFixed(2) + ' SOL</span>' +
@@ -686,13 +880,13 @@ const HTML_PAGE = `<!DOCTYPE html>
         '</div>';
       
       if (data.orderbooks.length === 0) {
-        grid.innerHTML = '<div class="empty">No orderbooks found</div>';
+        grid.innerHTML = '<div class="empty">No collections found</div>';
         return;
       }
       
       grid.innerHTML = data.orderbooks.map(function(ob) {
         var offersHtml = '';
-        if (ob.offers.length === 0) {
+        if (ob.offerCount === 0) {
           offersHtml = '<div class="no-offers">No active offers</div>';
         } else {
           offersHtml = '<div class="offers-list">' + 
@@ -709,13 +903,23 @@ const HTML_PAGE = `<!DOCTYPE html>
             }).join('') +
           '</div>';
         }
-        
+        var floorDiffText = (ob.floorDiff !== null && ob.floorDiffPercent !== null)
+          ? (ob.floorDiff > 0 ? '+' : '') + ob.floorDiff.toFixed(4) + ' (' + (ob.floorDiffPercent > 0 ? '+' : '') + ob.floorDiffPercent.toFixed(1) + '%)'
+          : 'N/A';
+        var topBidDiffText = (ob.topBidDiff !== null && ob.topBidDiffPercent !== null)
+          ? (ob.topBidDiff > 0 ? '+' : '') + ob.topBidDiff.toFixed(4) + ' (' + (ob.topBidDiffPercent > 0 ? '+' : '') + ob.topBidDiffPercent.toFixed(1) + '%)'
+          : 'N/A';
+
         return '<div class="card">' +
           '<div class="card-header">' +
             '<span class="collection-name">' + ob.collectionName + '</span>' +
-            '<span class="apr">' + ob.apr.toFixed(1) + '% APR</span>' +
+            '<span class="best-offer">' + (ob.bestOffer !== null ? ob.bestOffer.toFixed(4) + ' SOL' : 'N/A') + '</span>' +
           '</div>' +
           '<div class="card-stats">' +
+            '<div class="stat">' +
+              '<div class="stat-value best">' + (ob.bestOffer !== null ? ob.bestOffer.toFixed(4) : 'N/A') + '</div>' +
+              '<div class="stat-label">Best Offer</div>' +
+            '</div>' +
             '<div class="stat">' +
               '<div class="stat-value floor">' + (ob.floorPrice ? ob.floorPrice.toFixed(4) : 'N/A') + '</div>' +
               '<div class="stat-label">Floor</div>' +
@@ -724,27 +928,21 @@ const HTML_PAGE = `<!DOCTYPE html>
               '<div class="stat-value me-bid">' + (ob.meTopBid ? ob.meTopBid.toFixed(4) : 'N/A') + '</div>' +
               '<div class="stat-label">ME Top Bid</div>' +
             '</div>' +
-            '<div class="stat">' +
-              '<div class="stat-value ltv">' + (ob.ltv ? ob.ltv.toFixed(1) + '%' : 'N/A') + '</div>' +
-              '<div class="stat-label">LTV</div>' +
-            '</div>' +
-          '</div>' +
+'</div>' +
           '<div class="metrics-row">' +
             '<div class="metric">' +
               '<div class="metric-value ' + (ob.floorDiff > 0 ? 'diff-positive' : 'diff-negative') + '">' + 
-                (ob.floorDiff !== null ? (ob.floorDiff > 0 ? '+' : '') + ob.floorDiff.toFixed(4) : 'N/A') + 
-              '</div>' +
+                floorDiffText + '</div>' +
               '<div class="metric-label">Floor - Sharky</div>' +
             '</div>' +
             '<div class="metric">' +
               '<div class="metric-value ' + (ob.topBidDiff > 0 ? 'diff-positive' : 'diff-negative') + '">' + 
-                (ob.topBidDiff !== null ? (ob.topBidDiff > 0 ? '+' : '') + ob.topBidDiff.toFixed(4) : 'N/A') + 
-              '</div>' +
+                topBidDiffText + '</div>' +
               '<div class="metric-label">ME Bid - Sharky</div>' +
             '</div>' +
           '</div>' +
           '<div class="offers-section">' +
-            '<div class="offers-title">Active Offers</div>' +
+            '<div class="offers-title">Top Offers</div>' +
             offersHtml +
           '</div>' +
         '</div>';
